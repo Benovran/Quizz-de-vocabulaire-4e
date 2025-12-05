@@ -1,13 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="stylesheet" href="style.css">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A1 English Quiz</title>
+    <title>Interactive Vocabulary Learner</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Configure Tailwind to use Inter font -->
     <script>
         tailwind.config = {
             theme: {
@@ -15,278 +13,441 @@
                     fontFamily: {
                         sans: ['Inter', 'sans-serif'],
                     },
+                    colors: {
+                        'primary': '#059669', // Emerald 600
+                        'secondary': '#f97316', // Orange 600
+                        'card-bg': '#ffffff',
+                    }
                 }
             }
         }
     </script>
-    <!-- Firebase Imports -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, setDoc, doc, updateDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Firebase Globals (Mandatory for Canvas environment)
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
-
-        // App State
-        let db;
-        let auth;
-        let currentUserId = null;
-
-        /**
-         * Initializes Firebase and authenticates the user.
-         */
-        async function initFirebase() {
-            try {
-                // setLogLevel('Debug'); // Uncomment for verbose logging
-                const app = initializeApp(firebaseConfig);
-                auth = getAuth(app);
-                db = getFirestore(app);
-
-                // Authentication
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-
-                currentUserId = auth.currentUser.uid;
-                console.log("Firebase initialized. User ID:", currentUserId);
-
-                // Example of creating a private reference path (for compliance)
-                const complianceRefPath = `artifacts/${appId}/users/${currentUserId}/quiz_session_log`;
-                console.log("Compliance path established:", complianceRefPath);
-
-                // If you wanted to log the session start:
-                await setDoc(doc(db, complianceRefPath, Date.now().toString()), {
-                    startTime: serverTimestamp(),
-                    quizVersion: 'A1_Bilingual_V1'
-                });
-
-            } catch (error) {
-                console.error("Firebase initialization or sign-in failed:", error);
-            }
+    <style>
+        /* Card flip setup for Flashcard Mode */
+        .flip-card {
+            perspective: 1000px;
+            height: 250px;
+        }
+        .flip-card-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            text-align: center;
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+        .flip-card.flipped .flip-card-inner {
+            transform: rotateY(180deg);
+        }
+        .flip-card-front, .flip-card-back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+            border-radius: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 1.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .flip-card-front {
+            background-color: #f0fdf4; /* Light Green */
+            border: 2px solid #059669;
+        }
+        .flip-card-back {
+            background-color: #fef3c7; /* Light Yellow/Orange */
+            border: 2px solid #f97316;
+            transform: rotateY(180deg);
         }
 
-        // Make functions available globally after module execution
-        window.initFirebase = initFirebase;
-    </script>
+        /* General button styling */
+        .btn {
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        .btn:active {
+            transform: scale(0.98);
+        }
+    </style>
 </head>
-<body class="bg-gray-50 min-h-screen p-4 md:p-8 font-sans">
+<body class="font-sans flex items-center justify-center min-h-screen p-4 sm:p-6 bg-gray-100">
 
-    <div id="app" class="max-w-3xl mx-auto bg-white shadow-xl rounded-xl p-6 md:p-10 border border-gray-100">
+    <div id="app-container" class="w-full max-w-xl mx-auto bg-card-bg p-6 sm:p-8 rounded-xl shadow-2xl space-y-6">
+        
+        <!-- Header -->
+        <header class="text-center">
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">
+                Vocabulary Mastery Hub
+            </h1>
+            <p class="text-gray-600 text-lg font-medium">Detective Stories & Irish Folklore</p>
+        </header>
 
-        <h1 class="text-3xl font-bold text-indigo-700 mb-2">A1 English Quiz</h1>
-        <p class="text-gray-600 mb-6">
-            Read the question (Lisez la question) below and select the best word (le meilleur mot) to complete the sentence (pour compléter la phrase).
-        </p>
-
-        <div id="firebase-status" class="mb-4 text-sm text-center p-2 rounded-lg bg-yellow-100 text-yellow-800 hidden">
-            <span id="user-id-display">Loading Firebase...</span>
-        </div>
-
-        <div id="quiz-container">
-            <!-- Quiz questions will be dynamically loaded here -->
-        </div>
-
-        <div id="results-container" class="mt-8 pt-4 border-t border-gray-200 hidden">
-            <h2 class="text-2xl font-semibold text-green-600 mb-4">Quiz Finished!</h2>
-            <p id="score-display" class="text-lg mb-4"></p>
-            <div id="feedback-message" class="p-4 rounded-lg bg-blue-50 text-blue-800"></div>
-            <button id="restart-button" class="mt-4 w-full sm:w-auto px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
-                Restart Quiz
+        <!-- Mode Selector -->
+        <div class="flex justify-center space-x-4 mb-6">
+            <button id="mode-flashcard-btn" class="btn bg-primary text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-emerald-700">
+                Flashcard Mode
+            </button>
+            <button id="mode-quiz-btn" class="btn bg-gray-300 text-gray-800 font-bold py-2 px-6 rounded-lg shadow-md hover:bg-gray-400">
+                Quiz Mode (Full Test)
             </button>
         </div>
 
-        <!-- Custom Modal for Message Box -->
-        <div id="message-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center hidden">
-            <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
-                <h3 id="modal-title" class="text-xl font-bold text-red-600 mb-3">Error</h3>
-                <p id="modal-body" class="text-gray-700 mb-4">An unexpected error occurred.</p>
-                <button onclick="document.getElementById('message-modal').classList.add('hidden')" class="w-full py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition">
-                    Close
+        <!-- Progress and Status -->
+        <div class="flex justify-between items-center text-gray-600 font-semibold border-b pb-3 mb-4">
+            <div id="status-text">Select a mode to begin.</div>
+            <div id="progress-text"></div>
+        </div>
+
+        <!-- MAIN CONTENT AREA -->
+        
+        <!-- 1. Flashcard Mode UI -->
+        <div id="flashcard-mode" class="hidden space-y-4">
+            <div id="flashcard" class="flip-card">
+                <div class="flip-card-inner">
+                    <!-- Front (Question/Definition) -->
+                    <div id="card-front" class="flip-card-front">
+                        <p class="text-2xl font-bold text-gray-800 mb-2">Definition</p>
+                        <p id="flashcard-question" class="text-xl text-center font-medium text-primary"></p>
+                    </div>
+                    <!-- Back (Answer/Vocabulary Word) -->
+                    <div id="card-back" class="flip-card-back">
+                        <p class="text-2xl font-bold text-gray-800 mb-2">Vocabulary Word</p>
+                        <p id="flashcard-answer" class="text-xl text-center font-extrabold text-secondary"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-between gap-4 pt-4">
+                <button id="flip-btn" class="btn w-1/3 bg-gray-600 text-white font-bold py-3 rounded-lg hover:bg-gray-700">
+                    Flip Card
+                </button>
+                <button id="prev-btn" class="btn w-1/3 bg-secondary text-white font-bold py-3 rounded-lg hover:bg-orange-700 disabled:opacity-50" disabled>
+                    &larr; Previous
+                </button>
+                <button id="next-btn" class="btn w-1/3 bg-primary text-white font-bold py-3 rounded-lg hover:bg-emerald-700">
+                    Next Word &rarr;
                 </button>
             </div>
+        </div>
+
+        <!-- 2. Quiz Mode UI -->
+        <div id="quiz-mode" class="hidden space-y-6">
+            <!-- Question Display -->
+            <div class="bg-card-bg p-6 rounded-lg border-2 border-primary shadow-md min-h-[120px] flex flex-col justify-center">
+                <p id="quiz-question-text" class="text-xl sm:text-2xl font-semibold text-gray-800 text-center">
+                    Question loading...
+                </p>
+            </div>
+
+            <!-- Answer Input & Submit -->
+            <div class="flex flex-col sm:flex-row gap-4">
+                <input type="text" id="quiz-answer-input" placeholder="Type your answer here..." 
+                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-secondary transition">
+                <button id="quiz-submit-btn" class="btn bg-secondary text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-orange-700 disabled:opacity-50">
+                    Check
+                </button>
+            </div>
+
+            <!-- Feedback Message -->
+            <div id="quiz-feedback-message" class="text-center text-lg font-semibold min-h-[30px]"></div>
+
+        </div>
+
+        <!-- 3. Result Screen (Shared) -->
+        <div id="result-container" class="hidden text-center p-8 bg-gray-50 rounded-lg shadow-lg">
+            <h2 class="text-3xl font-bold text-primary mb-4">Mode Complete!</h2>
+            <p id="result-message" class="text-xl text-gray-700 mb-6"></p>
+            <p id="final-score" class="text-5xl font-extrabold text-secondary mb-8"></p>
+            <button id="restart-all-btn" class="btn w-full bg-primary text-white font-bold py-3 rounded-lg hover:bg-emerald-700">
+                Start Over
+            </button>
         </div>
     </div>
 
     <script>
-        // Use the custom modal instead of alert()
-        function showMessage(title, message, isError = true) {
-            const modal = document.getElementById('message-modal');
-            document.getElementById('modal-title').textContent = title;
-            document.getElementById('modal-title').className = isError ? 'text-xl font-bold text-red-600 mb-3' : 'text-xl font-bold text-green-600 mb-3';
-            document.getElementById('modal-body').textContent = message;
-            modal.classList.remove('hidden');
-        }
+        // --- 1. Vocabulary Data Structure (Complete List) ---
+        const vocabulary = [
+            // Category: Mystery (Concept: Definition)
+            { category: "Mystery", question: "A place characterized by the presence of a spirit or ghost.", answer: ["haunted"] },
+            { category: "Mystery", question: "Difficult or impossible to understand; seeming to hide secrets.", answer: ["mysterious"] },
+            { category: "Mystery", question: "Causing fear or alarm; extremely frightening.", answer: ["scary", "terrifying", "frightening"] },
+            { category: "Mystery", question: "A sudden feeling of coldness, often causing goosebumps.", answer: ["chill"] },
+            { category: "Mystery", question: "The time of day when the sun rises.", answer: ["dawn"] },
+            { category: "Mystery", question: "The time of day when the sun sets and light fades.", answer: ["dusk"] },
+            { category: "Mystery", question: "Synonym for **strange** or unsettlingly mysterious.", answer: ["eerie"] },
+            { category: "Mystery", question: "Synonym for **horrible**, describing something shocking and blood-curdling.", answer: ["grisly"] },
+            { category: "Mystery", question: "Synonym for **fog**, a cloud of fine water droplets at ground level.", answer: ["mist"] },
+            { category: "Mystery", question: "Synonym for **creepy** or mildly unsettling.", answer: ["spooky"] },
+            { category: "Mystery", question: "Phrasal verb: To move slowly, quietly, and stealthily toward someone.", answer: ["creep up"] },
 
-        const quizData = [
-            {
-                // Simple greeting/identity
-                description: "This is a question (C'est une question) about identity (identité) and age.",
-                question: "Hi! I ____ John and I am ten years old.",
-                options: ["have", "is", "am", "do"],
-                correctAnswer: "am"
-            },
-            {
-                // Simple present tense verb
-                description: "Select the verb (Sélectionnez le verbe) that correctly describes (décrit correctement) a morning action (une action matinale).",
-                question: "Every morning, my father ____ coffee.",
-                options: ["drinks", "eating", "go", "sleeps"],
-                correctAnswer: "drinks"
-            },
-            {
-                // Vocabulary (colors)
-                description: "Choose the color (Choisissez la couleur) of the sun (du soleil) and a lemon (un citron).",
-                question: "The color of the bus is ____.",
-                options: ["blue", "red", "yellow", "green"],
-                correctAnswer: "yellow"
-            }
+            // Category: Creatures
+            { category: "Creatures", question: "A powerful, evil supernatural being, often associated with malevolence.", answer: ["demon"] },
+            { category: "Creatures", question: "A small, mythical being, often with human form and magical powers (like síofra).", answer: ["fairy"] },
+            { category: "Creatures", question: "A Scottish/Irish shape-shifting water spirit, usually appearing as a horse.", answer: ["kelpie"] },
+            { category: "Creatures", question: "A person, especially a woman, who practices magic or sorcery.", answer: ["witch"] },
+            { category: "Creatures", question: "An incorporeal entity; synonym for **spirit** or **ghost**.", answer: ["spectre", "spirit", "ghost"] },
+            { category: "Creatures", question: "A massive, powerful, and often terrifying wild animal or monster.", answer: ["beast"] },
+            { category: "Creatures", question: "A mythical person who changes into a wolf or wolf-like creature.", answer: ["werewolf"] },
+
+            // Category: Places
+            { category: "Places", question: "The action of constructing a large, long-lasting structure (verb).", answer: ["build"] },
+            { category: "Places", question: "A large fortified building or set of buildings, usually royal.", answer: ["castle"] },
+            { category: "Places", question: "A small place of Christian worship, often attached to an institution.", answer: ["chapel"] },
+            { category: "Places", question: "A large body of water surrounded by land.", answer: ["lake"] },
+            { category: "Places", question: "A place where bodies are kept temporarily pending identification or burial.", answer: ["morgue"] },
+            { category: "Places", question: "A large, natural stream of water flowing to the sea or another lake.", answer: ["river"] },
+            { category: "Places", question: "A long, narrow passageway beneath the ground.", answer: ["underground tunnel"] },
+            { category: "Places", question: "Synonym for **cemetery**, a place for burial.", answer: ["graveyard"] },
+            { category: "Places", question: "Synonym for **prison**, a place for holding living criminals.", answer: ["jail", "prison"] },
+            { category: "Places", question: "Synonym for **prairie** or an open, grassy field.", answer: ["meadow"] },
+            { category: "Places", question: "The stone marker placed at the head of a grave.", answer: ["tombstone"] },
+
+            // Category: Legends & Hypotheses
+            { category: "Legends", question: "Belonging to or resembling magic, fantasy, or enchantment.", answer: ["magical"] },
+            { category: "Legends", question: "A traditional story, often explaining a natural phenomenon.", answer: ["myth"] },
+            { category: "Legends", question: "Unverified, widely-circulated stories or pieces of gossip.", answer: ["rumours", "rumors"] },
+            { category: "Legends", question: "To come into sight; become visible.", answer: ["appear"] },
+            { category: "Legends", question: "The opposite of 'appear'; to suddenly cease to be visible.", answer: ["disappear", "vanish"] },
+            { category: "Legends", question: "Synonym for **story** or an unverified narrative.", answer: ["tale"] },
+            { category: "Legends", question: "The outward form or look of someone or something.", answer: ["appearance"] },
+            { category: "Legends", question: "A brief or momentary sight.", answer: ["glimpse"] },
+            { category: "Legends", question: "A dark, indistinct outline of a figure or object.", answer: ["shadow"] },
+            { category: "Legends", question: "The external form or outline of someone or something.", answer: ["shape"] },
+
+            { category: "Hypotheses", question: "Degree of confidence: Complete certainty, with no doubt remaining.", answer: ["certainly", "definitely"] },
+            { category: "Hypotheses", question: "Degree of confidence: Low to moderate possibility (around 50% or less).", answer: ["possibly", "maybe", "perhaps"] },
+            { category: "Hypotheses", question: "Degree of confidence: Medium level of likelihood or probability.", answer: ["probably"] },
+            { category: "Hypotheses", question: "Synonym for **supposedly** or claimed without proof.", answer: ["allegedly"] },
+            { category: "Hypotheses", question: "Phrase: Claim widely believed but unconfirmed (synonym for 'be rumoured').", answer: ["be said to"] },
+            { category: "Hypotheses", question: "Synonym for **guess**; making an assumption or unconfirmed thought.", answer: ["suppose"] },
+            { category: "Hypotheses", question: "Used to introduce a confirmed fact that contrasts with a rumor.", answer: ["actually"] },
+            { category: "Hypotheses", question: "To accept a statement or story as true.", answer: ["believe"] },
         ];
-
+        
+        // --- 2. State Variables ---
+        let currentMode = 'none'; // 'flashcard' or 'quiz'
         let currentQuestionIndex = 0;
         let score = 0;
-        const quizContainer = document.getElementById('quiz-container');
-        const resultsContainer = document.getElementById('results-container');
-        const scoreDisplay = document.getElementById('score-display');
-        const feedbackMessage = document.getElementById('feedback-message');
-        const restartButton = document.getElementById('restart-button');
-        const firebaseStatusDiv = document.getElementById('firebase-status');
-        const userIdDisplay = document.getElementById('user-id-display');
+        const totalVocabularyCount = vocabulary.length;
 
-        /**
-         * Renders the current question and options.
-         */
-        function renderQuestion() {
-            if (currentQuestionIndex >= quizData.length) {
-                showResults();
+        // --- 3. DOM Elements ---
+        const modeFlashcardBtn = document.getElementById('mode-flashcard-btn');
+        const modeQuizBtn = document.getElementById('mode-quiz-btn');
+        const statusText = document.getElementById('status-text');
+        const progressText = document.getElementById('progress-text');
+        const flashcardModeDiv = document.getElementById('flashcard-mode');
+        const quizModeDiv = document.getElementById('quiz-mode');
+        const resultContainer = document.getElementById('result-container');
+
+        // Flashcard Elements
+        const flashcard = document.getElementById('flashcard');
+        const flashcardQuestion = document.getElementById('flashcard-question');
+        const flashcardAnswer = document.getElementById('flashcard-answer');
+        const flipBtn = document.getElementById('flip-btn');
+        const prevBtn = document.getElementById('prev-btn');
+        const nextBtn = document.getElementById('next-btn');
+
+        // Quiz Elements
+        const quizQuestionText = document.getElementById('quiz-question-text');
+        const quizAnswerInput = document.getElementById('quiz-answer-input');
+        const quizSubmitBtn = document.getElementById('quiz-submit-btn');
+        const quizFeedbackMessage = document.getElementById('quiz-feedback-message');
+        const finalScore = document.getElementById('final-score');
+        const resultMessage = document.getElementById('result-message');
+        const restartAllBtn = document.getElementById('restart-all-btn');
+
+
+        // --- 4. Helper Functions ---
+        
+        // Fisher-Yates shuffle algorithm
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function cleanAnswer(str) {
+            // Remove spaces, convert to lowercase, and handle simple punctuation
+            return str.toLowerCase().trim().replace(/ /g, '').replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,""); 
+        }
+
+        function resetState() {
+            currentQuestionIndex = 0;
+            score = 0;
+            resultContainer.classList.add('hidden');
+            flashcardModeDiv.classList.add('hidden');
+            quizModeDiv.classList.add('hidden');
+            statusText.textContent = "Select a mode to begin.";
+            progressText.textContent = '';
+            
+            // Re-shuffle the main vocabulary array only when resetting the application
+            shuffleArray(vocabulary); 
+        }
+
+        function setActiveMode(mode) {
+            currentMode = mode;
+            resetState(); // Reset internal state, but keep the UI hidden until started
+            
+            modeFlashcardBtn.classList.remove('bg-primary', 'text-white');
+            modeQuizBtn.classList.remove('bg-primary', 'text-white');
+            modeFlashcardBtn.classList.add('bg-gray-300', 'text-gray-800');
+            modeQuizBtn.classList.add('bg-gray-300', 'text-gray-800');
+
+            if (mode === 'flashcard') {
+                modeFlashcardBtn.classList.replace('bg-gray-300', 'bg-primary');
+                modeFlashcardBtn.classList.replace('text-gray-800', 'text-white');
+                startFlashcardMode();
+            } else if (mode === 'quiz') {
+                modeQuizBtn.classList.replace('bg-gray-300', 'bg-primary');
+                modeQuizBtn.classList.replace('text-gray-800', 'text-white');
+                startQuizMode();
+            }
+        }
+
+        // --- 5. Flashcard Mode Logic ---
+
+        function startFlashcardMode() {
+            currentQuestionIndex = 0;
+            flashcardModeDiv.classList.remove('hidden');
+            quizModeDiv.classList.add('hidden');
+            statusText.textContent = "Mode: Flashcards (Practice)";
+            loadFlashcard();
+        }
+
+        function loadFlashcard() {
+            if (currentQuestionIndex >= totalVocabularyCount) {
+                // Loop back to the start for continuous study
+                currentQuestionIndex = 0; 
+            }
+            if (currentQuestionIndex < 0) {
+                // Loop to the end if going backward from the start
+                currentQuestionIndex = totalVocabularyCount - 1; 
+            }
+
+            const item = vocabulary[currentQuestionIndex];
+            
+            // Set content
+            flashcardQuestion.innerHTML = `Category: <strong>${item.category}</strong><br>${item.question}`;
+            flashcardAnswer.textContent = item.answer[0]; // Show the primary answer for flashcard
+            
+            // Reset card state
+            flashcard.classList.remove('flipped');
+            
+            // Update navigation buttons
+            prevBtn.disabled = false;
+            nextBtn.disabled = false;
+
+            // Update progress
+            progressText.textContent = `Word ${currentQuestionIndex + 1} of ${totalVocabularyCount}`;
+        }
+
+        function navigateFlashcard(direction) {
+            currentQuestionIndex += direction;
+            loadFlashcard();
+        }
+
+        // --- 6. Quiz Mode Logic (Extensive Test) ---
+
+        function startQuizMode() {
+            currentQuestionIndex = 0;
+            score = 0;
+            quizModeDiv.classList.remove('hidden');
+            flashcardModeDiv.classList.add('hidden');
+            statusText.textContent = "Mode: Quiz (Full Test)";
+            quizAnswerInput.disabled = false;
+            quizSubmitBtn.disabled = false;
+            loadQuizQuestion();
+        }
+
+        function loadQuizQuestion() {
+            if (currentQuestionIndex < totalVocabularyCount) {
+                const q = vocabulary[currentQuestionIndex];
+                quizQuestionText.innerHTML = `<span class="text-secondary font-bold text-lg block mb-1">Category: ${q.category}</span>${q.question}`;
+                progressText.textContent = `Question ${currentQuestionIndex + 1} of ${totalVocabularyCount}`;
+                quizAnswerInput.value = '';
+                quizFeedbackMessage.textContent = '';
+                quizAnswerInput.focus();
+            } else {
+                showResults('quiz');
+            }
+        }
+
+        function checkQuizAnswer() {
+            if (quizAnswerInput.value.trim() === "") {
+                quizFeedbackMessage.className = 'text-center text-lg font-bold text-yellow-600';
+                quizFeedbackMessage.textContent = 'Type an answer first!';
                 return;
             }
 
-            const data = quizData[currentQuestionIndex];
-            quizContainer.innerHTML = `
-                <div class="p-6 bg-indigo-50 border border-indigo-200 rounded-lg mb-6">
-                    <p class="text-sm font-semibold text-indigo-700 uppercase mb-2">Description (Description)</p>
-                    <p class="text-gray-700">${data.description}</p>
-                </div>
+            const userAnswer = cleanAnswer(quizAnswerInput.value);
+            const currentQuestion = vocabulary[currentQuestionIndex];
+            
+            const isCorrect = currentQuestion.answer.some(correctWord => cleanAnswer(correctWord) === userAnswer);
+            const correctAnswerDisplay = currentQuestion.answer[0];
 
-                <div class="mb-6">
-                    <p class="text-xl font-medium text-gray-800 mb-4">
-                        <span class="text-indigo-600 mr-2">Q${currentQuestionIndex + 1}.</span> ${data.question}
-                    </p>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="options-container">
-                    ${data.options.map((option, index) => `
-                        <button
-                            data-answer="${option}"
-                            class="option-button w-full text-left px-5 py-3 bg-gray-100 text-gray-800 rounded-lg border border-gray-200 hover:bg-indigo-50 hover:border-indigo-400 transition duration-150 font-medium shadow-sm"
-                        >
-                            ${option}
-                        </button>
-                    `).join('')}
-                </div>
-            `;
-
-            // Attach event listeners to new buttons
-            document.querySelectorAll('.option-button').forEach(button => {
-                button.addEventListener('click', handleAnswer);
-            });
-        }
-
-        /**
-         * Handles the user's answer selection.
-         * @param {Event} event - The click event.
-         */
-        function handleAnswer(event) {
-            const selectedAnswer = event.target.getAttribute('data-answer');
-            const data = quizData[currentQuestionIndex];
-
-            // Disable all buttons after selection
-            document.querySelectorAll('.option-button').forEach(button => {
-                button.disabled = true;
-                // Add base disabled style
-                button.classList.add('opacity-70', 'cursor-not-allowed');
-
-                if (button.getAttribute('data-answer') === data.correctAnswer) {
-                    // Highlight correct answer in green
-                    button.classList.remove('bg-gray-100', 'hover:bg-indigo-50', 'hover:border-indigo-400');
-                    button.classList.add('bg-green-100', 'border-green-500', 'text-green-800', 'font-bold');
-                } else if (button.getAttribute('data-answer') === selectedAnswer) {
-                    // Highlight wrong answer in red
-                    button.classList.remove('bg-gray-100', 'hover:bg-indigo-50', 'hover:border-indigo-400');
-                    button.classList.add('bg-red-100', 'border-red-500', 'text-red-800', 'font-bold');
-                }
-            });
-
-            if (selectedAnswer === data.correctAnswer) {
+            if (isCorrect) {
                 score++;
-                event.target.classList.add('ring-4', 'ring-green-300');
+                quizFeedbackMessage.className = 'text-center text-lg font-bold text-primary';
+                quizFeedbackMessage.textContent = '✅ Correct!';
             } else {
-                event.target.classList.add('ring-4', 'ring-red-300');
+                quizFeedbackMessage.className = 'text-center text-lg font-bold text-red-500';
+                quizFeedbackMessage.textContent = `❌ Incorrect. The correct answer was: ${correctAnswerDisplay}.`;
             }
 
-            // Move to next question after a brief delay
+            // Disable input briefly
+            quizSubmitBtn.disabled = true;
+            quizAnswerInput.disabled = true;
+
             setTimeout(() => {
                 currentQuestionIndex++;
-                renderQuestion();
-            }, 1000);
+                quizSubmitBtn.disabled = false;
+                quizAnswerInput.disabled = false;
+                loadQuizQuestion();
+            }, 1500); // Short delay for feedback
         }
 
-        /**
-         * Displays the quiz results.
-         */
-        function showResults() {
-            quizContainer.classList.add('hidden');
-            resultsContainer.classList.remove('hidden');
-
-            const totalQuestions = quizData.length;
-            const percentage = Math.round((score / totalQuestions) * 100);
-
-            scoreDisplay.textContent = `You scored ${score} out of ${totalQuestions} points (${percentage}%).`;
-
-            let feedbackText = '';
-            if (percentage === 100) {
-                feedbackText = "Parfait! (Perfect!) You did an excellent job (un excellent travail)!";
-            } else if (percentage >= 66) {
-                feedbackText = "Très bien! (Very good!) You are learning quickly (Vous apprenez vite). Keep practicing (Continuez à pratiquer)!";
-            } else {
-                feedbackText = "You need a little more practice (Vous avez besoin d'un peu plus de pratique). Review the basics (Révisez les bases) and try again!";
+        function showResults(mode) {
+            flashcardModeDiv.classList.add('hidden');
+            quizModeDiv.classList.add('hidden');
+            resultContainer.classList.remove('hidden');
+            
+            if (mode === 'quiz') {
+                resultMessage.textContent = "You completed the Full Vocabulary Test!";
+                finalScore.textContent = `${score}/${totalVocabularyCount}`;
+            } else if (mode === 'flashcard') {
+                 resultMessage.textContent = "You completed one cycle of all flashcards. Ready to go again?";
+                 finalScore.textContent = `${totalVocabularyCount} Words Studied`;
             }
-
-            feedbackMessage.innerHTML = `<span class="font-semibold">Feedback:</span> ${feedbackText}`;
         }
+        
+        // --- 7. Event Listeners ---
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initial setup to shuffle words for both modes
+            shuffleArray(vocabulary);
+        });
 
-        /**
-         * Resets the quiz state and starts over.
-         */
-        function restartQuiz() {
-            currentQuestionIndex = 0;
-            score = 0;
-            resultsContainer.classList.add('hidden');
-            quizContainer.classList.remove('hidden');
-            renderQuestion();
-        }
+        // Mode Switching
+        modeFlashcardBtn.addEventListener('click', () => setActiveMode('flashcard'));
+        modeQuizBtn.addEventListener('click', () => setActiveMode('quiz'));
+        restartAllBtn.addEventListener('click', () => resetState());
 
-        // --- Initialization ---
+        // Flashcard Listeners
+        flipBtn.addEventListener('click', () => flashcard.classList.toggle('flipped'));
+        prevBtn.addEventListener('click', () => navigateFlashcard(-1));
+        nextBtn.addEventListener('click', () => navigateFlashcard(1));
 
-        window.onload = async () => {
-            // Wait for Firebase to initialize and sign in
-            await window.initFirebase();
-
-            // Check if user ID is available
-            const auth = window.auth;
-            if (auth && auth.currentUser) {
-                userIdDisplay.textContent = `User ID: ${auth.currentUser.uid}`;
-                firebaseStatusDiv.classList.remove('hidden');
+        // Quiz Listeners
+        quizSubmitBtn.addEventListener('click', checkQuizAnswer);
+        quizAnswerInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !quizSubmitBtn.disabled) {
+                checkQuizAnswer();
             }
+        });
 
-            // Start the quiz
-            renderQuestion();
-            restartButton.addEventListener('click', restartQuiz);
-        };
     </script>
 </body>
 </html>
