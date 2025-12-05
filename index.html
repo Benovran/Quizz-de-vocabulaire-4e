@@ -3,451 +3,329 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive Vocabulary Learner</title>
-    <!-- Load Tailwind CSS -->
+    <title>Student Sign-In & Group Dashboard</title>
+    <!-- Load Tailwind CSS for beautiful styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    },
                     colors: {
-                        'primary': '#059669', // Emerald 600
-                        'secondary': '#f97316', // Orange 600
-                        'card-bg': '#ffffff',
-                    }
+                        'primary': '#059669', // Emerald green
+                        'secondary': '#f97316', // Orange
+                    },
                 }
             }
         }
     </script>
-    <style>
-        /* Card flip setup for Flashcard Mode */
-        .flip-card {
-            perspective: 1000px;
-            height: 250px;
-        }
-        .flip-card-inner {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            text-align: center;
-            transition: transform 0.6s;
-            transform-style: preserve-3d;
-        }
-        .flip-card.flipped .flip-card-inner {
-            transform: rotateY(180deg);
-        }
-        .flip-card-front, .flip-card-back {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            -webkit-backface-visibility: hidden;
-            backface-visibility: hidden;
-            border-radius: 0.75rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            padding: 1.5rem;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        }
-        .flip-card-front {
-            background-color: #f0fdf4; /* Light Green */
-            border: 2px solid #059669;
-        }
-        .flip-card-back {
-            background-color: #fef3c7; /* Light Yellow/Orange */
-            border: 2px solid #f97316;
-            transform: rotateY(180deg);
+    <script type="module">
+        // --- Firebase Imports ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, collection, addDoc, query, onSnapshot, orderBy, limit, 
+            serverTimestamp, setLogLevel 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Set log level for debugging
+        setLogLevel('Debug');
+
+        // Global Firebase variables (provided by the Canvas environment)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth;
+        let userId = null;
+        let isAuthReady = false;
+        
+        // Configuration for this specific application
+        const MAX_STUDENTS_TO_DISPLAY = 30; 
+        const DUMMY_TOTAL_SCORE = 100; // Since we are not running a real quiz, we simulate a score out of 100.
+
+        // --- Initialization and Authentication ---
+        function initFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Start Authentication Listener
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        // Hide loading, show content
+                        document.getElementById('loading-state').classList.add('hidden');
+                        document.getElementById('app-container').classList.remove('opacity-0');
+                        
+                        // Load results only after auth is confirmed
+                        loadGroupResults(); 
+                    } else {
+                        // User is signed out, attempt sign-in
+                        handleAuth();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization error:", error);
+                document.getElementById('loading-state').innerHTML = `<p class="text-red-500">Error loading application. Check console for details.</p>`;
+            }
         }
 
-        /* General button styling */
-        .btn {
-            transition: background-color 0.2s, transform 0.1s;
+        async function handleAuth() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    // Sign in anonymously if no token is available
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Authentication failed:", error);
+                document.getElementById('loading-state').innerHTML = `<p class="text-red-500">Authentication failed: ${error.message}</p>`;
+            }
         }
-        .btn:active {
-            transform: scale(0.98);
+
+        // --- Firestore Data Functions ---
+
+        // The public collection path to store names and scores
+        const SIGN_INS_COLLECTION = `artifacts/${appId}/public/data/student_signins`;
+
+        /**
+         * Saves the student's name and a dummy performance metric (e.g., 85/100)
+         * to the Firestore database.
+         * @param {string} studentName The name of the student.
+         */
+        async function saveStudentNameAndPerformance(studentName) {
+            if (!isAuthReady || !db) return console.error("Database not ready.");
+
+            const signinBtn = document.getElementById('signin-btn');
+            signinBtn.disabled = true;
+            signinBtn.innerHTML = 'Submitting...';
+
+            try {
+                // Generate a random score between 60 and 100 for demonstration
+                const score = Math.floor(Math.random() * (100 - 60 + 1)) + 60; 
+
+                await addDoc(collection(db, SIGN_INS_COLLECTION), {
+                    studentName: studentName,
+                    score: score,
+                    total: DUMMY_TOTAL_SCORE,
+                    timestamp: serverTimestamp(),
+                    userId: userId 
+                });
+                
+                showSuccessMessage(`Success! ${studentName}'s score (${score}%) recorded.`);
+                document.getElementById('student-name-input').value = '';
+
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                showErrorMessage("Error saving name. Check console.");
+            } finally {
+                signinBtn.disabled = false;
+                signinBtn.innerHTML = 'Sign In & Record Performance';
+            }
         }
-    </style>
+
+        /**
+         * Sets up a real-time listener to fetch and update all group results.
+         */
+        function loadGroupResults() {
+            if (!isAuthReady || !db) return;
+
+            const resultsContainer = document.getElementById('group-results-list');
+            const overallPerformance = document.getElementById('overall-performance-card');
+            
+            // Query: Get documents, ordered by timestamp (newest first), limited to the top 30
+            const q = query(
+                collection(db, SIGN_INS_COLLECTION), 
+                orderBy("timestamp", "desc"),
+                limit(MAX_STUDENTS_TO_DISPLAY)
+            );
+
+            // onSnapshot sets up the real-time listener!
+            onSnapshot(q, (snapshot) => {
+                const allResults = [];
+                let totalScore = 0;
+                let totalTests = 0;
+                let totalMax = 0;
+                
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    allResults.push({ id: doc.id, ...data });
+                    totalScore += data.score;
+                    totalMax += data.total;
+                    totalTests++;
+                });
+
+                // --- Calculate and Display Overall Performance ---
+                const groupAverage = totalMax > 0 ? ((totalScore / totalMax) * 100).toFixed(1) : '0.0';
+                
+                // Update the large performance card
+                overallPerformance.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-xl font-semibold text-gray-600">Group Average Score</div>
+                            <div class="text-6xl font-extrabold text-primary mt-2">${groupAverage}%</div>
+                            <div class="text-sm text-gray-500 mt-1">Based on ${totalTests} Submissions</div>
+                        </div>
+                        <div class="text-primary opacity-50">
+                            <!-- SVG Bar Chart Icon (Placeholder) -->
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-20 w-20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M11 3.5v17m0 0a3 3 0 01-6 0m6 0a3 3 0 016 0m-6 0h-3.5m6 0h3.5M3.5 10H7m0 0a3 3 0 000 6M7 10h10m0 0a3 3 0 010 6M10 7.5V16m-6 0h3.5m6 0h3.5m-6 0v-8.5" />
+                            </svg>
+                        </div>
+                    </div>
+                `;
+
+                // --- Display Individual Results List ---
+                resultsContainer.innerHTML = '';
+                
+                if (allResults.length === 0) {
+                    resultsContainer.innerHTML = '<p class="text-center p-4 text-gray-500">No student data submitted yet. Be the first!</p>';
+                    return;
+                }
+
+                allResults.forEach((result) => {
+                    const accuracy = ((result.score / result.total) * 100).toFixed(0);
+                    // Format timestamp
+                    const timestamp = result.timestamp ? new Date(result.timestamp.seconds * 1000).toLocaleString('en-US', {
+                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                    }) : 'N/A';
+                    
+                    resultsContainer.innerHTML += `
+                        <li class="flex justify-between items-center p-3 border-b border-gray-100 hover:bg-gray-50 transition">
+                            <div class="font-medium text-gray-800 truncate">${result.studentName}</div>
+                            <div class="text-right flex items-center space-x-4">
+                                <span class="text-sm text-gray-500">${timestamp}</span>
+                                <span class="font-bold text-lg ${accuracy >= 80 ? 'text-primary' : 'text-secondary'}">${accuracy}%</span>
+                            </div>
+                        </li>
+                    `;
+                });
+            }, (error) => {
+                console.error("Error listening to group results:", error);
+                resultsContainer.innerHTML = `<p class="text-red-500 text-center p-4">Error loading results.</p>`;
+            });
+        }
+        
+        // --- UI Feedback Messages ---
+        function showMessage(message, type = 'success') {
+            const container = document.getElementById('feedback-message');
+            container.textContent = message;
+            container.className = `p-3 rounded-lg text-white font-semibold text-center mt-4 transition duration-300 ${type === 'success' ? 'bg-primary' : 'bg-red-500'}`;
+            container.classList.remove('hidden');
+            setTimeout(() => {
+                container.classList.add('hidden');
+            }, 3000);
+        }
+
+        function showSuccessMessage(message) { showMessage(message, 'success'); }
+        function showErrorMessage(message) { showMessage(message, 'error'); }
+
+        // --- Event Listener and Initial Load ---
+        function handleSigninClick() {
+            const name = document.getElementById('student-name-input').value.trim();
+            if (name.length < 2) {
+                showErrorMessage('Please enter a valid name (at least 2 characters).');
+                return;
+            }
+            if (name.length > 30) {
+                showErrorMessage('Name cannot exceed 30 characters.');
+                return;
+            }
+            // Save the data to Firestore
+            saveStudentNameAndPerformance(name);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const signinBtn = document.getElementById('signin-btn');
+            signinBtn.addEventListener('click', handleSigninClick);
+
+            const nameInput = document.getElementById('student-name-input');
+            nameInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !signinBtn.disabled) {
+                    handleSigninClick();
+                }
+            });
+            
+            // Start Firebase initialization
+            initFirebase();
+        });
+    </script>
 </head>
 <body class="font-sans flex items-center justify-center min-h-screen p-4 sm:p-6 bg-gray-100">
 
-    <div id="app-container" class="w-full max-w-xl mx-auto bg-card-bg p-6 sm:p-8 rounded-xl shadow-2xl space-y-6">
-        
-        <!-- Header -->
-        <header class="text-center">
-            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">
-                Vocabulary Mastery Hub
-            </h1>
-            <p class="text-gray-600 text-lg font-medium">Detective Stories & Irish Folklore</p>
-        </header>
-
-        <!-- Mode Selector -->
-        <div class="flex justify-center space-x-4 mb-6">
-            <button id="mode-flashcard-btn" class="btn bg-primary text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-emerald-700">
-                Flashcard Mode
-            </button>
-            <button id="mode-quiz-btn" class="btn bg-gray-300 text-gray-800 font-bold py-2 px-6 rounded-lg shadow-md hover:bg-gray-400">
-                Quiz Mode (Full Test)
-            </button>
-        </div>
-
-        <!-- Progress and Status -->
-        <div class="flex justify-between items-center text-gray-600 font-semibold border-b pb-3 mb-4">
-            <div id="status-text">Select a mode to begin.</div>
-            <div id="progress-text"></div>
-        </div>
-
-        <!-- MAIN CONTENT AREA -->
-        
-        <!-- 1. Flashcard Mode UI -->
-        <div id="flashcard-mode" class="hidden space-y-4">
-            <div id="flashcard" class="flip-card">
-                <div class="flip-card-inner">
-                    <!-- Front (Question/Definition) -->
-                    <div id="card-front" class="flip-card-front">
-                        <p class="text-2xl font-bold text-gray-800 mb-2">Definition</p>
-                        <p id="flashcard-question" class="text-xl text-center font-medium text-primary"></p>
-                    </div>
-                    <!-- Back (Answer/Vocabulary Word) -->
-                    <div id="card-back" class="flip-card-back">
-                        <p class="text-2xl font-bold text-gray-800 mb-2">Vocabulary Word</p>
-                        <p id="flashcard-answer" class="text-xl text-center font-extrabold text-secondary"></p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="flex justify-between gap-4 pt-4">
-                <button id="flip-btn" class="btn w-1/3 bg-gray-600 text-white font-bold py-3 rounded-lg hover:bg-gray-700">
-                    Flip Card
-                </button>
-                <button id="prev-btn" class="btn w-1/3 bg-secondary text-white font-bold py-3 rounded-lg hover:bg-orange-700 disabled:opacity-50" disabled>
-                    &larr; Previous
-                </button>
-                <button id="next-btn" class="btn w-1/3 bg-primary text-white font-bold py-3 rounded-lg hover:bg-emerald-700">
-                    Next Word &rarr;
-                </button>
-            </div>
-        </div>
-
-        <!-- 2. Quiz Mode UI -->
-        <div id="quiz-mode" class="hidden space-y-6">
-            <!-- Question Display -->
-            <div class="bg-card-bg p-6 rounded-lg border-2 border-primary shadow-md min-h-[120px] flex flex-col justify-center">
-                <p id="quiz-question-text" class="text-xl sm:text-2xl font-semibold text-gray-800 text-center">
-                    Question loading...
-                </p>
-            </div>
-
-            <!-- Answer Input & Submit -->
-            <div class="flex flex-col sm:flex-row gap-4">
-                <input type="text" id="quiz-answer-input" placeholder="Type your answer here..." 
-                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-secondary transition">
-                <button id="quiz-submit-btn" class="btn bg-secondary text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-orange-700 disabled:opacity-50">
-                    Check
-                </button>
-            </div>
-
-            <!-- Feedback Message -->
-            <div id="quiz-feedback-message" class="text-center text-lg font-semibold min-h-[30px]"></div>
-
-        </div>
-
-        <!-- 3. Result Screen (Shared) -->
-        <div id="result-container" class="hidden text-center p-8 bg-gray-50 rounded-lg shadow-lg">
-            <h2 class="text-3xl font-bold text-primary mb-4">Mode Complete!</h2>
-            <p id="result-message" class="text-xl text-gray-700 mb-6"></p>
-            <p id="final-score" class="text-5xl font-extrabold text-secondary mb-8"></p>
-            <button id="restart-all-btn" class="btn w-full bg-primary text-white font-bold py-3 rounded-lg hover:bg-emerald-700">
-                Start Over
-            </button>
-        </div>
+    <!-- Loading State -->
+    <div id="loading-state" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center p-8 z-10">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-primary mx-auto"></div>
+        <p class="mt-4 text-gray-600">Connecting to secure database...</p>
     </div>
 
+    <!-- Main Application Container -->
+    <div id="app-container" class="w-full max-w-3xl mx-auto bg-white p-6 sm:p-10 rounded-xl shadow-2xl transition duration-500 opacity-0 space-y-8">
+        
+        <!-- Header -->
+        <header class="text-center border-b pb-4">
+            <h1 class="text-4xl sm:text-5xl font-extrabold text-gray-900">
+                Group Performance Tracker
+            </h1>
+            <p class="text-gray-600 text-lg">Real-time sign-in and performance dashboard.</p>
+        </header>
+
+        <!-- 1. Sign-In Form -->
+        <div class="bg-gray-50 p-6 rounded-lg shadow-inner space-y-4 border border-gray-200">
+            <h2 class="text-2xl font-bold text-gray-700">Student Sign-In</h2>
+            <div class="flex flex-col sm:flex-row gap-3">
+                <input type="text" id="student-name-input" placeholder="Enter Your Name (max 30 characters)" maxlength="30"
+                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-secondary transition">
+                <button id="signin-btn" class="bg-secondary text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-orange-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                    Sign In & Record Performance
+                </button>
+            </div>
+            <div id="feedback-message" class="hidden"></div>
+        </div>
+
+        <!-- 2. Group Performance Dashboard -->
+        <div class="mt-8">
+            <h3 class="text-2xl font-bold text-gray-700 mb-4">Overall Group Results</h3>
+            
+            <!-- Performance Card -->
+            <div id="overall-performance-card" class="bg-white p-6 rounded-xl border-4 border-primary/50 shadow-lg min-h-[150px] flex items-center justify-center">
+                <p class="text-gray-500">Awaiting data...</p>
+            </div>
+
+            <!-- Individual Results List (Limited to 30) -->
+            <div class="mt-6">
+                <h4 class="text-xl font-semibold text-gray-700 mb-3">Recent Student Entries (Max ${MAX_STUDENTS_TO_DISPLAY})</h4>
+                <ul id="group-results-list" class="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 max-h-96 overflow-y-auto shadow-md">
+                    <li class="p-4 text-center text-gray-500">Loading student entries...</li>
+                    <!-- Student list will be injected here by the real-time listener -->
+                </ul>
+            </div>
+            
+            <p class="text-xs text-gray-400 mt-4 text-center">User Session ID: <span id="user-id-display">${userId || '...loading'}</span></p>
+
+        </div>
+
+    </div>
+    
     <script>
-        // --- 1. Vocabulary Data Structure (Complete List) ---
-        const vocabulary = [
-            // Category: Mystery (Concept: Definition)
-            { category: "Mystery", question: "A place characterized by the presence of a spirit or ghost.", answer: ["haunted"] },
-            { category: "Mystery", question: "Difficult or impossible to understand; seeming to hide secrets.", answer: ["mysterious"] },
-            { category: "Mystery", question: "Causing fear or alarm; extremely frightening.", answer: ["scary", "terrifying", "frightening"] },
-            { category: "Mystery", question: "A sudden feeling of coldness, often causing goosebumps.", answer: ["chill"] },
-            { category: "Mystery", question: "The time of day when the sun rises.", answer: ["dawn"] },
-            { category: "Mystery", question: "The time of day when the sun sets and light fades.", answer: ["dusk"] },
-            { category: "Mystery", question: "Synonym for **strange** or unsettlingly mysterious.", answer: ["eerie"] },
-            { category: "Mystery", question: "Synonym for **horrible**, describing something shocking and blood-curdling.", answer: ["grisly"] },
-            { category: "Mystery", question: "Synonym for **fog**, a cloud of fine water droplets at ground level.", answer: ["mist"] },
-            { category: "Mystery", question: "Synonym for **creepy** or mildly unsettling.", answer: ["spooky"] },
-            { category: "Mystery", question: "Phrasal verb: To move slowly, quietly, and stealthily toward someone.", answer: ["creep up"] },
-
-            // Category: Creatures
-            { category: "Creatures", question: "A powerful, evil supernatural being, often associated with malevolence.", answer: ["demon"] },
-            { category: "Creatures", question: "A small, mythical being, often with human form and magical powers (like síofra).", answer: ["fairy"] },
-            { category: "Creatures", question: "A Scottish/Irish shape-shifting water spirit, usually appearing as a horse.", answer: ["kelpie"] },
-            { category: "Creatures", question: "A person, especially a woman, who practices magic or sorcery.", answer: ["witch"] },
-            { category: "Creatures", question: "An incorporeal entity; synonym for **spirit** or **ghost**.", answer: ["spectre", "spirit", "ghost"] },
-            { category: "Creatures", question: "A massive, powerful, and often terrifying wild animal or monster.", answer: ["beast"] },
-            { category: "Creatures", question: "A mythical person who changes into a wolf or wolf-like creature.", answer: ["werewolf"] },
-
-            // Category: Places
-            { category: "Places", question: "The action of constructing a large, long-lasting structure (verb).", answer: ["build"] },
-            { category: "Places", question: "A large fortified building or set of buildings, usually royal.", answer: ["castle"] },
-            { category: "Places", question: "A small place of Christian worship, often attached to an institution.", answer: ["chapel"] },
-            { category: "Places", question: "A large body of water surrounded by land.", answer: ["lake"] },
-            { category: "Places", question: "A place where bodies are kept temporarily pending identification or burial.", answer: ["morgue"] },
-            { category: "Places", question: "A large, natural stream of water flowing to the sea or another lake.", answer: ["river"] },
-            { category: "Places", question: "A long, narrow passageway beneath the ground.", answer: ["underground tunnel"] },
-            { category: "Places", question: "Synonym for **cemetery**, a place for burial.", answer: ["graveyard"] },
-            { category: "Places", question: "Synonym for **prison**, a place for holding living criminals.", answer: ["jail", "prison"] },
-            { category: "Places", question: "Synonym for **prairie** or an open, grassy field.", answer: ["meadow"] },
-            { category: "Places", question: "The stone marker placed at the head of a grave.", answer: ["tombstone"] },
-
-            // Category: Legends & Hypotheses
-            { category: "Legends", question: "Belonging to or resembling magic, fantasy, or enchantment.", answer: ["magical"] },
-            { category: "Legends", question: "A traditional story, often explaining a natural phenomenon.", answer: ["myth"] },
-            { category: "Legends", question: "Unverified, widely-circulated stories or pieces of gossip.", answer: ["rumours", "rumors"] },
-            { category: "Legends", question: "To come into sight; become visible.", answer: ["appear"] },
-            { category: "Legends", question: "The opposite of 'appear'; to suddenly cease to be visible.", answer: ["disappear", "vanish"] },
-            { category: "Legends", question: "Synonym for **story** or an unverified narrative.", answer: ["tale"] },
-            { category: "Legends", question: "The outward form or look of someone or something.", answer: ["appearance"] },
-            { category: "Legends", question: "A brief or momentary sight.", answer: ["glimpse"] },
-            { category: "Legends", question: "A dark, indistinct outline of a figure or object.", answer: ["shadow"] },
-            { category: "Legends", question: "The external form or outline of someone or something.", answer: ["shape"] },
-
-            { category: "Hypotheses", question: "Degree of confidence: Complete certainty, with no doubt remaining.", answer: ["certainly", "definitely"] },
-            { category: "Hypotheses", question: "Degree of confidence: Low to moderate possibility (around 50% or less).", answer: ["possibly", "maybe", "perhaps"] },
-            { category: "Hypotheses", question: "Degree of confidence: Medium level of likelihood or probability.", answer: ["probably"] },
-            { category: "Hypotheses", question: "Synonym for **supposedly** or claimed without proof.", answer: ["allegedly"] },
-            { category: "Hypotheses", question: "Phrase: Claim widely believed but unconfirmed (synonym for 'be rumoured').", answer: ["be said to"] },
-            { category: "Hypotheses", question: "Synonym for **guess**; making an assumption or unconfirmed thought.", answer: ["suppose"] },
-            { category: "Hypotheses", question: "Used to introduce a confirmed fact that contrasts with a rumor.", answer: ["actually"] },
-            { category: "Hypotheses", question: "To accept a statement or story as true.", answer: ["believe"] },
-        ];
-        
-        // --- 2. State Variables ---
-        let currentMode = 'none'; // 'flashcard' or 'quiz'
-        let currentQuestionIndex = 0;
-        let score = 0;
-        const totalVocabularyCount = vocabulary.length;
-
-        // --- 3. DOM Elements ---
-        const modeFlashcardBtn = document.getElementById('mode-flashcard-btn');
-        const modeQuizBtn = document.getElementById('mode-quiz-btn');
-        const statusText = document.getElementById('status-text');
-        const progressText = document.getElementById('progress-text');
-        const flashcardModeDiv = document.getElementById('flashcard-mode');
-        const quizModeDiv = document.getElementById('quiz-mode');
-        const resultContainer = document.getElementById('result-container');
-
-        // Flashcard Elements
-        const flashcard = document.getElementById('flashcard');
-        const flashcardQuestion = document.getElementById('flashcard-question');
-        const flashcardAnswer = document.getElementById('flashcard-answer');
-        const flipBtn = document.getElementById('flip-btn');
-        const prevBtn = document.getElementById('prev-btn');
-        const nextBtn = document.getElementById('next-btn');
-
-        // Quiz Elements
-        const quizQuestionText = document.getElementById('quiz-question-text');
-        const quizAnswerInput = document.getElementById('quiz-answer-input');
-        const quizSubmitBtn = document.getElementById('quiz-submit-btn');
-        const quizFeedbackMessage = document.getElementById('quiz-feedback-message');
-        const finalScore = document.getElementById('final-score');
-        const resultMessage = document.getElementById('result-message');
-        const restartAllBtn = document.getElementById('restart-all-btn');
-
-
-        // --- 4. Helper Functions ---
-        
-        // Fisher-Yates shuffle algorithm
-        function shuffleArray(array) {
-            for (let i = array.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
-            }
-        }
-
-        function cleanAnswer(str) {
-            // Remove spaces, convert to lowercase, and handle simple punctuation
-            return str.toLowerCase().trim().replace(/ /g, '').replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,""); 
-        }
-
-        function resetState() {
-            currentQuestionIndex = 0;
-            score = 0;
-            resultContainer.classList.add('hidden');
-            flashcardModeDiv.classList.add('hidden');
-            quizModeDiv.classList.add('hidden');
-            statusText.textContent = "Select a mode to begin.";
-            progressText.textContent = '';
-            
-            // Re-shuffle the main vocabulary array only when resetting the application
-            shuffleArray(vocabulary); 
-        }
-
-        function setActiveMode(mode) {
-            currentMode = mode;
-            resetState(); // Reset internal state, but keep the UI hidden until started
-            
-            modeFlashcardBtn.classList.remove('bg-primary', 'text-white');
-            modeQuizBtn.classList.remove('bg-primary', 'text-white');
-            modeFlashcardBtn.classList.add('bg-gray-300', 'text-gray-800');
-            modeQuizBtn.classList.add('bg-gray-300', 'text-gray-800');
-
-            if (mode === 'flashcard') {
-                modeFlashcardBtn.classList.replace('bg-gray-300', 'bg-primary');
-                modeFlashcardBtn.classList.replace('text-gray-800', 'text-white');
-                startFlashcardMode();
-            } else if (mode === 'quiz') {
-                modeQuizBtn.classList.replace('bg-gray-300', 'bg-primary');
-                modeQuizBtn.classList.replace('text-gray-800', 'text-white');
-                startQuizMode();
-            }
-        }
-
-        // --- 5. Flashcard Mode Logic ---
-
-        function startFlashcardMode() {
-            currentQuestionIndex = 0;
-            flashcardModeDiv.classList.remove('hidden');
-            quizModeDiv.classList.add('hidden');
-            statusText.textContent = "Mode: Flashcards (Practice)";
-            loadFlashcard();
-        }
-
-        function loadFlashcard() {
-            if (currentQuestionIndex >= totalVocabularyCount) {
-                // Loop back to the start for continuous study
-                currentQuestionIndex = 0; 
-            }
-            if (currentQuestionIndex < 0) {
-                // Loop to the end if going backward from the start
-                currentQuestionIndex = totalVocabularyCount - 1; 
-            }
-
-            const item = vocabulary[currentQuestionIndex];
-            
-            // Set content
-            flashcardQuestion.innerHTML = `Category: <strong>${item.category}</strong><br>${item.question}`;
-            flashcardAnswer.textContent = item.answer[0]; // Show the primary answer for flashcard
-            
-            // Reset card state
-            flashcard.classList.remove('flipped');
-            
-            // Update navigation buttons
-            prevBtn.disabled = false;
-            nextBtn.disabled = false;
-
-            // Update progress
-            progressText.textContent = `Word ${currentQuestionIndex + 1} of ${totalVocabularyCount}`;
-        }
-
-        function navigateFlashcard(direction) {
-            currentQuestionIndex += direction;
-            loadFlashcard();
-        }
-
-        // --- 6. Quiz Mode Logic (Extensive Test) ---
-
-        function startQuizMode() {
-            currentQuestionIndex = 0;
-            score = 0;
-            quizModeDiv.classList.remove('hidden');
-            flashcardModeDiv.classList.add('hidden');
-            statusText.textContent = "Mode: Quiz (Full Test)";
-            quizAnswerInput.disabled = false;
-            quizSubmitBtn.disabled = false;
-            loadQuizQuestion();
-        }
-
-        function loadQuizQuestion() {
-            if (currentQuestionIndex < totalVocabularyCount) {
-                const q = vocabulary[currentQuestionIndex];
-                quizQuestionText.innerHTML = `<span class="text-secondary font-bold text-lg block mb-1">Category: ${q.category}</span>${q.question}`;
-                progressText.textContent = `Question ${currentQuestionIndex + 1} of ${totalVocabularyCount}`;
-                quizAnswerInput.value = '';
-                quizFeedbackMessage.textContent = '';
-                quizAnswerInput.focus();
+        // Update the user ID display once known
+        window.addEventListener('load', () => {
+            const userIdDisplay = document.getElementById('user-id-display');
+            if (window.userId) {
+                userIdDisplay.textContent = window.userId;
             } else {
-                showResults('quiz');
-            }
-        }
-
-        function checkQuizAnswer() {
-            if (quizAnswerInput.value.trim() === "") {
-                quizFeedbackMessage.className = 'text-center text-lg font-bold text-yellow-600';
-                quizFeedbackMessage.textContent = 'Type an answer first!';
-                return;
-            }
-
-            const userAnswer = cleanAnswer(quizAnswerInput.value);
-            const currentQuestion = vocabulary[currentQuestionIndex];
-            
-            const isCorrect = currentQuestion.answer.some(correctWord => cleanAnswer(correctWord) === userAnswer);
-            const correctAnswerDisplay = currentQuestion.answer[0];
-
-            if (isCorrect) {
-                score++;
-                quizFeedbackMessage.className = 'text-center text-lg font-bold text-primary';
-                quizFeedbackMessage.textContent = '✅ Correct!';
-            } else {
-                quizFeedbackMessage.className = 'text-center text-lg font-bold text-red-500';
-                quizFeedbackMessage.textContent = `❌ Incorrect. The correct answer was: ${correctAnswerDisplay}.`;
-            }
-
-            // Disable input briefly
-            quizSubmitBtn.disabled = true;
-            quizAnswerInput.disabled = true;
-
-            setTimeout(() => {
-                currentQuestionIndex++;
-                quizSubmitBtn.disabled = false;
-                quizAnswerInput.disabled = false;
-                loadQuizQuestion();
-            }, 1500); // Short delay for feedback
-        }
-
-        function showResults(mode) {
-            flashcardModeDiv.classList.add('hidden');
-            quizModeDiv.classList.add('hidden');
-            resultContainer.classList.remove('hidden');
-            
-            if (mode === 'quiz') {
-                resultMessage.textContent = "You completed the Full Vocabulary Test!";
-                finalScore.textContent = `${score}/${totalVocabularyCount}`;
-            } else if (mode === 'flashcard') {
-                 resultMessage.textContent = "You completed one cycle of all flashcards. Ready to go again?";
-                 finalScore.textContent = `${totalVocabularyCount} Words Studied`;
-            }
-        }
-        
-        // --- 7. Event Listeners ---
-        
-        document.addEventListener('DOMContentLoaded', () => {
-            // Initial setup to shuffle words for both modes
-            shuffleArray(vocabulary);
-        });
-
-        // Mode Switching
-        modeFlashcardBtn.addEventListener('click', () => setActiveMode('flashcard'));
-        modeQuizBtn.addEventListener('click', () => setActiveMode('quiz'));
-        restartAllBtn.addEventListener('click', () => resetState());
-
-        // Flashcard Listeners
-        flipBtn.addEventListener('click', () => flashcard.classList.toggle('flipped'));
-        prevBtn.addEventListener('click', () => navigateFlashcard(-1));
-        nextBtn.addEventListener('click', () => navigateFlashcard(1));
-
-        // Quiz Listeners
-        quizSubmitBtn.addEventListener('click', checkQuizAnswer);
-        quizAnswerInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' && !quizSubmitBtn.disabled) {
-                checkQuizAnswer();
+                // Wait for the onAuthStateChanged in the module script to set the ID
+                setTimeout(() => {
+                    if (document.querySelector('#app-container').classList.contains('opacity-0')) return;
+                     userIdDisplay.textContent = (document.querySelector('body').outerHTML.match(/Current User ID: ([a-zA-Z0-9]+)/)?.[1] || 'Unknown').substring(0, 8) + '...';
+                }, 2000); 
             }
         });
-
     </script>
+
 </body>
 </html>
