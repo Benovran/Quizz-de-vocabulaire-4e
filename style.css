@@ -1,0 +1,17 @@
+body {
+    background-color: #ff6b6b; /* Fond rouge sympa */
+    font-family: Arial, sans-serif; /* Police plus belle */
+    text-align: center; /* Texte centré */
+    padding: 50px; /* Espace autour du texte */
+}
+
+h1 {
+    color: white; /* Titre en blanc */
+    font-size: 36px; /* Taille du titre */
+}
+
+p {
+    color: #f8f9fa; /* Texte en gris clair */
+    font-size: 20px; /* Taille du texte */
+    line-height: 1.6; /* Espacement entre les lignes */
+}

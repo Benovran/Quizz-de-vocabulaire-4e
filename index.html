@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A1 English Quiz</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configure Tailwind to use Inter font -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, setDoc, doc, updateDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Globals (Mandatory for Canvas environment)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
+
+        // App State
+        let db;
+        let auth;
+        let currentUserId = null;
+
+        /**
+         * Initializes Firebase and authenticates the user.
+         */
+        async function initFirebase() {
+            try {
+                // setLogLevel('Debug'); // Uncomment for verbose logging
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Authentication
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                currentUserId = auth.currentUser.uid;
+                console.log("Firebase initialized. User ID:", currentUserId);
+
+                // Example of creating a private reference path (for compliance)
+                const complianceRefPath = `artifacts/${appId}/users/${currentUserId}/quiz_session_log`;
+                console.log("Compliance path established:", complianceRefPath);
+
+                // If you wanted to log the session start:
+                await setDoc(doc(db, complianceRefPath, Date.now().toString()), {
+                    startTime: serverTimestamp(),
+                    quizVersion: 'A1_Bilingual_V1'
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization or sign-in failed:", error);
+            }
+        }
+
+        // Make functions available globally after module execution
+        window.initFirebase = initFirebase;
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 md:p-8 font-sans">
+
+    <div id="app" class="max-w-3xl mx-auto bg-white shadow-xl rounded-xl p-6 md:p-10 border border-gray-100">
+
+        <h1 class="text-3xl font-bold text-indigo-700 mb-2">A1 English Quiz</h1>
+        <p class="text-gray-600 mb-6">
+            Read the question (Lisez la question) below and select the best word (le meilleur mot) to complete the sentence (pour compléter la phrase).
+        </p>
+
+        <div id="firebase-status" class="mb-4 text-sm text-center p-2 rounded-lg bg-yellow-100 text-yellow-800 hidden">
+            <span id="user-id-display">Loading Firebase...</span>
+        </div>
+
+        <div id="quiz-container">
+            <!-- Quiz questions will be dynamically loaded here -->
+        </div>
+
+        <div id="results-container" class="mt-8 pt-4 border-t border-gray-200 hidden">
+            <h2 class="text-2xl font-semibold text-green-600 mb-4">Quiz Finished!</h2>
+            <p id="score-display" class="text-lg mb-4"></p>
+            <div id="feedback-message" class="p-4 rounded-lg bg-blue-50 text-blue-800"></div>
+            <button id="restart-button" class="mt-4 w-full sm:w-auto px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md">
+                Restart Quiz
+            </button>
+        </div>
+
+        <!-- Custom Modal for Message Box -->
+        <div id="message-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center hidden">
+            <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
+                <h3 id="modal-title" class="text-xl font-bold text-red-600 mb-3">Error</h3>
+                <p id="modal-body" class="text-gray-700 mb-4">An unexpected error occurred.</p>
+                <button onclick="document.getElementById('message-modal').classList.add('hidden')" class="w-full py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Use the custom modal instead of alert()
+        function showMessage(title, message, isError = true) {
+            const modal = document.getElementById('message-modal');
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-title').className = isError ? 'text-xl font-bold text-red-600 mb-3' : 'text-xl font-bold text-green-600 mb-3';
+            document.getElementById('modal-body').textContent = message;
+            modal.classList.remove('hidden');
+        }
+
+        const quizData = [
+            {
+                // Simple greeting/identity
+                description: "This is a question (C'est une question) about identity (identité) and age.",
+                question: "Hi! I ____ John and I am ten years old.",
+                options: ["have", "is", "am", "do"],
+                correctAnswer: "am"
+            },
+            {
+                // Simple present tense verb
+                description: "Select the verb (Sélectionnez le verbe) that correctly describes (décrit correctement) a morning action (une action matinale).",
+                question: "Every morning, my father ____ coffee.",
+                options: ["drinks", "eating", "go", "sleeps"],
+                correctAnswer: "drinks"
+            },
+            {
+                // Vocabulary (colors)
+                description: "Choose the color (Choisissez la couleur) of the sun (du soleil) and a lemon (un citron).",
+                question: "The color of the bus is ____.",
+                options: ["blue", "red", "yellow", "green"],
+                correctAnswer: "yellow"
+            }
+        ];
+
+        let currentQuestionIndex = 0;
+        let score = 0;
+        const quizContainer = document.getElementById('quiz-container');
+        const resultsContainer = document.getElementById('results-container');
+        const scoreDisplay = document.getElementById('score-display');
+        const feedbackMessage = document.getElementById('feedback-message');
+        const restartButton = document.getElementById('restart-button');
+        const firebaseStatusDiv = document.getElementById('firebase-status');
+        const userIdDisplay = document.getElementById('user-id-display');
+
+        /**
+         * Renders the current question and options.
+         */
+        function renderQuestion() {
+            if (currentQuestionIndex >= quizData.length) {
+                showResults();
+                return;
+            }
+
+            const data = quizData[currentQuestionIndex];
+            quizContainer.innerHTML = `
+                <div class="p-6 bg-indigo-50 border border-indigo-200 rounded-lg mb-6">
+                    <p class="text-sm font-semibold text-indigo-700 uppercase mb-2">Description (Description)</p>
+                    <p class="text-gray-700">${data.description}</p>
+                </div>
+
+                <div class="mb-6">
+                    <p class="text-xl font-medium text-gray-800 mb-4">
+                        <span class="text-indigo-600 mr-2">Q${currentQuestionIndex + 1}.</span> ${data.question}
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="options-container">
+                    ${data.options.map((option, index) => `
+                        <button
+                            data-answer="${option}"
+                            class="option-button w-full text-left px-5 py-3 bg-gray-100 text-gray-800 rounded-lg border border-gray-200 hover:bg-indigo-50 hover:border-indigo-400 transition duration-150 font-medium shadow-sm"
+                        >
+                            ${option}
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+
+            // Attach event listeners to new buttons
+            document.querySelectorAll('.option-button').forEach(button => {
+                button.addEventListener('click', handleAnswer);
+            });
+        }
+
+        /**
+         * Handles the user's answer selection.
+         * @param {Event} event - The click event.
+         */
+        function handleAnswer(event) {
+            const selectedAnswer = event.target.getAttribute('data-answer');
+            const data = quizData[currentQuestionIndex];
+
+            // Disable all buttons after selection
+            document.querySelectorAll('.option-button').forEach(button => {
+                button.disabled = true;
+                // Add base disabled style
+                button.classList.add('opacity-70', 'cursor-not-allowed');
+
+                if (button.getAttribute('data-answer') === data.correctAnswer) {
+                    // Highlight correct answer in green
+                    button.classList.remove('bg-gray-100', 'hover:bg-indigo-50', 'hover:border-indigo-400');
+                    button.classList.add('bg-green-100', 'border-green-500', 'text-green-800', 'font-bold');
+                } else if (button.getAttribute('data-answer') === selectedAnswer) {
+                    // Highlight wrong answer in red
+                    button.classList.remove('bg-gray-100', 'hover:bg-indigo-50', 'hover:border-indigo-400');
+                    button.classList.add('bg-red-100', 'border-red-500', 'text-red-800', 'font-bold');
+                }
+            });
+
+            if (selectedAnswer === data.correctAnswer) {
+                score++;
+                event.target.classList.add('ring-4', 'ring-green-300');
+            } else {
+                event.target.classList.add('ring-4', 'ring-red-300');
+            }
+
+            // Move to next question after a brief delay
+            setTimeout(() => {
+                currentQuestionIndex++;
+                renderQuestion();
+            }, 1000);
+        }
+
+        /**
+         * Displays the quiz results.
+         */
+        function showResults() {
+            quizContainer.classList.add('hidden');
+            resultsContainer.classList.remove('hidden');
+
+            const totalQuestions = quizData.length;
+            const percentage = Math.round((score / totalQuestions) * 100);
+
+            scoreDisplay.textContent = `You scored ${score} out of ${totalQuestions} points (${percentage}%).`;
+
+            let feedbackText = '';
+            if (percentage === 100) {
+                feedbackText = "Parfait! (Perfect!) You did an excellent job (un excellent travail)!";
+            } else if (percentage >= 66) {
+                feedbackText = "Très bien! (Very good!) You are learning quickly (Vous apprenez vite). Keep practicing (Continuez à pratiquer)!";
+            } else {
+                feedbackText = "You need a little more practice (Vous avez besoin d'un peu plus de pratique). Review the basics (Révisez les bases) and try again!";
+            }
+
+            feedbackMessage.innerHTML = `<span class="font-semibold">Feedback:</span> ${feedbackText}`;
+        }
+
+        /**
+         * Resets the quiz state and starts over.
+         */
+        function restartQuiz() {
+            currentQuestionIndex = 0;
+            score = 0;
+            resultsContainer.classList.add('hidden');
+            quizContainer.classList.remove('hidden');
+            renderQuestion();
+        }
+
+        // --- Initialization ---
+
+        window.onload = async () => {
+            // Wait for Firebase to initialize and sign in
+            await window.initFirebase();
+
+            // Check if user ID is available
+            const auth = window.auth;
+            if (auth && auth.currentUser) {
+                userIdDisplay.textContent = `User ID: ${auth.currentUser.uid}`;
+                firebaseStatusDiv.classList.remove('hidden');
+            }
+
+            // Start the quiz
+            renderQuestion();
+            restartButton.addEventListener('click', restartQuiz);
+        };
+    </script>
+</body>
+</html>
